@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: analyzer-service
+  namespace: sentinelops
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analyzer-service
+  namespace: sentinelops
+  labels: { app: analyzer-service }
+spec:
+  # Each replica owns a share of the telemetry partitions (6 by default), so more than 6 would idle.
+  replicas: 2
+  selector:
+    matchLabels: { app: analyzer-service }
+  template:
+    metadata:
+      labels: { app: analyzer-service }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /actuator/prometheus
+        prometheus.io/port: "8082"
+    spec:
+      serviceAccountName: analyzer-service   # used for Vault Kubernetes auth
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: analyzer-service
+          image: ghcr.io/maihunritik/sentinelops-analyzer:latest
+          ports: [{ containerPort: 8082, name: http }]
+          envFrom:
+            - configMapRef: { name: sentinelops-config }
+          env:
+            - name: SENTINEL_KAFKA_CONCURRENCY
+              value: "3"
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 768Mi }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            initialDelaySeconds: 15
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            initialDelaySeconds: 40
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analyzer-service
+  namespace: sentinelops
+spec:
+  selector: { app: analyzer-service }
+  ports: [{ port: 80, targetPort: http, name: http }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: analyzer-service
+  namespace: sentinelops
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: analyzer-service }

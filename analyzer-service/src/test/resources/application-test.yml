@@ -1,0 +1,10 @@
+spring:
+  cache:
+    type: simple
+  kafka:
+    consumer:
+      auto-offset-reset: earliest
+sentinel:
+  detection:
+    scheduler-enabled: false
+    min-samples: 10
